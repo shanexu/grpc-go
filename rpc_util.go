@@ -637,6 +637,33 @@ func (p *parser) recvMsg(maxReceiveMessageSize int) (pf payloadFormat, msg []byt
 	return pf, msg, nil
 }
 
+func (p *parser) recvRaw(maxReceiveMessageSize int) (msg []byte, err error) {
+	if _, err := p.r.Read(p.header[:]); err != nil {
+		return nil, err
+	}
+
+	length := binary.BigEndian.Uint32(p.header[1:])
+
+	if length == 0 {
+		return nil, nil
+	}
+	if int64(length) > int64(maxInt) {
+		return nil, status.Errorf(codes.ResourceExhausted, "grpc: received message larger than max length allowed on current machine (%d vs. %d)", length, maxInt)
+	}
+	if int(length) > maxReceiveMessageSize {
+		return nil, status.Errorf(codes.ResourceExhausted, "grpc: received message larger than max (%d vs. %d)", length, maxReceiveMessageSize)
+	}
+	msg = p.recvBufferPool.Get(5 + int(length))
+	copy(msg, p.header[:])
+	if _, err := p.r.Read(msg[5:]); err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		return nil, err
+	}
+	return msg, nil
+}
+
 // encode serializes msg and returns a buffer containing the message, or an
 // error if it is too large to be transmitted by grpc.  If msg is nil, it
 // generates an empty message.
@@ -795,6 +822,10 @@ func recvAndDecompress(p *parser, s *transport.Stream, dc Decompressor, maxRecei
 	return uncompressedBuf, cancel, nil
 }
 
+func recvAndNoDecompress(p *parser, maxReceiveMessageSize int) (buf []byte, err error) {
+	return p.recvRaw(maxReceiveMessageSize)
+}
+
 // Using compressor, decompress d, returning data and size.
 // Optionally, if data will be over maxReceiveMessageSize, just return the size.
 func decompress(compressor encoding.Compressor, d []byte, maxReceiveMessageSize int) ([]byte, int, error) {
@@ -840,6 +871,14 @@ func recv(p *parser, c baseCodec, s *transport.Stream, dc Decompressor, m any, m
 		return status.Errorf(codes.Internal, "grpc: failed to unmarshal the received message: %v", err)
 	}
 	return nil
+}
+
+func recvRaw(p *parser, s *transport.Stream, maxReceiveMessageSize int, payInfo *payloadInfo) ([]byte, error) {
+	buf, err := recvAndNoDecompress(p, maxReceiveMessageSize)
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 // Information about RPC

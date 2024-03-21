@@ -93,6 +93,7 @@ type ClientStream interface {
 	// to call SendMsg on the same stream in different goroutines. It is also
 	// not safe to call CloseSend concurrently with SendMsg.
 	SendMsg(m any) error
+	SendRaw(m []byte) error
 	// RecvMsg blocks until it receives a message into m or the stream is
 	// done. It returns io.EOF when the stream completes successfully. On
 	// any other error, the stream is aborted and the error contains the RPC
@@ -102,6 +103,7 @@ type ClientStream interface {
 	// calling RecvMsg on the same stream at the same time, but it is not
 	// safe to call RecvMsg on the same stream in different goroutines.
 	RecvMsg(m any) error
+	RecvRaw() ([]byte, error)
 }
 
 // ClientInterceptor is an interceptor for gRPC client streams.
